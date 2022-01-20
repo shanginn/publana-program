@@ -2,7 +2,7 @@
 solana_ads = "GMyP4dhUir2sc41zTGRavav79nfim1WaTp2FUmiThHU2"
 
 [registry]
-url = "https://anchor.projectserum.com"
+url = "https://publana.vercel.app/"
 
 [provider]
 cluster = "localnet"

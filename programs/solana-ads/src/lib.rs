@@ -3,7 +3,7 @@ use borsh::{BorshSerialize, BorshDeserialize};
 use anchor_lang::solana_program::{
     system_instruction,
     system_program,
-    program::{invoke_signed, invoke},
+    program::invoke,
     native_token::lamports_to_sol,
 };
 
@@ -42,6 +42,15 @@ const MAX_TITLE_LENGTH: usize = 280;
 const BASE_TAX_LAMPORTS: u64 = 100000;
 const TAX_PER_RANK_LAMPORTS: u64 = 10000;
 
+enum Categories {
+    Buy,
+    Sell,
+    LookingForJob,
+    JobOffer,
+    NFT,
+    Other,
+}
+
 #[program]
 pub mod solana_ads {
     use super::*;
@@ -50,6 +59,7 @@ pub mod solana_ads {
         ctx: Context<CreateAd>,
         title: String,
         content: String,
+        image: String,
         text_limit: u32,
         rank: u64,
     ) -> ProgramResult {
@@ -65,25 +75,32 @@ pub mod solana_ads {
 
         ad.title = title;
         ad.content = content;
+        ad.image = image;
         ad.authority = authority.key();
         ad.timestamp = clock.unix_timestamp;
         ad.text_limit = text_limit;
         ad.rank = rank;
 
+        let tax = BASE_TAX_LAMPORTS + TAX_PER_RANK_LAMPORTS * rank;
+
+        msg!("Tax: {} SOL", lamports_to_sol(tax));
+
+        transfer_tax(ctx, tax).unwrap();
+
+        Ok(())
+    }
+
+    pub fn transfer_tax(ctx: Context<CreateAd>, tax: u64) -> ProgramResult {
+        let authority = &mut ctx.accounts.authority;
         let kolyan_account = &ctx.accounts.kolyan_account;
         let viktrch_account = &ctx.accounts.viktrch_account;
         let system_program = &ctx.accounts.system_program;
         let derived_address = &ctx.accounts.derived_address;
 
-        let tax = BASE_TAX_LAMPORTS + TAX_PER_RANK_LAMPORTS * rank;
-
-        msg!("Tax: {} SOL", lamports_to_sol(tax));
-
         invoke(
             &system_instruction::transfer(&authority.key(), &ctx.accounts.derived_address.key(), tax),
-            &[authority.to_account_info(), ctx.accounts.derived_address.to_account_info()],
-        )
-        .unwrap();
+            &[authority.to_account_info(), derived_address.to_account_info()],
+        )?;
 
         invoke(
             &system_instruction::transfer_with_seed(
@@ -98,10 +115,9 @@ pub mod solana_ads {
                 authority.to_account_info(),
                 viktrch_account.to_account_info(),
                 system_program.to_account_info(),
-                ctx.accounts.derived_address.to_account_info(),
+                derived_address.to_account_info(),
             ],
-        )
-        .unwrap();
+        )?;
 
         msg!("Half sent to Victrch");
 
@@ -118,10 +134,9 @@ pub mod solana_ads {
                 authority.to_account_info(),
                 kolyan_account.to_account_info(),
                 system_program.to_account_info(),
-                ctx.accounts.derived_address.to_account_info(),
+                derived_address.to_account_info(),
             ],
-        )
-            .unwrap();
+        )?;
 
         Ok(())
     }
@@ -172,14 +187,14 @@ pub struct CreateAd<'info> {
     #[account(address = system_program::ID)]
     pub system_program: Program<'info, System>,
 
-    #[account(address = VIKTRCH_ACCOUNT, mut)]
-    pub viktrch_account: UncheckedAccount<'info>,
-
-    #[account(address = KOLYAN_ACCOUNT, mut)]
-    pub kolyan_account: UncheckedAccount<'info>,
-
     #[account(mut)]
     pub derived_address: AccountInfo<'info>,
+
+    #[account(address = CREATORS_KEYS[0], mut)]
+    pub kolyan_account: UncheckedAccount<'info>,
+
+    #[account(address = CREATORS_KEYS[1], mut)]
+    pub viktrch_account: UncheckedAccount<'info>,
 }
 
 #[derive(Accounts)]
@@ -212,6 +227,7 @@ pub struct AppendAdContent<'info> {
 pub struct Ad {
     pub title: String,
     pub content: String,
+    pub image: String,
     pub timestamp: i64,
     pub authority: Pubkey,
     pub text_limit: u32,
@@ -229,6 +245,7 @@ impl Ad {
         struct CreateAdArgs {
             pub title: String,
             pub content: String,
+            pub image: String,
             pub text_len: u32,
             pub rank: u64,
         }
@@ -238,7 +255,9 @@ impl Ad {
         let size = DISCRIMINATOR_LENGTH
             + STRING_LENGTH_PREFIX
             + STRING_LENGTH_PREFIX
+            + STRING_LENGTH_PREFIX
             + (create_ad_args.text_len as usize) * 4
+            + create_ad_args.image.chars() * 4
             + size_of::<i64>() // Timestamp
             + size_of::<u64>() // Rank
             + size_of::<Pubkey>() // Public key
