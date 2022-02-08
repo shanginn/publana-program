@@ -48,6 +48,7 @@ enum Categories {
     LookingForJob,
     JobOffer,
     NFT,
+    Message,
     Other,
 }
 
@@ -257,7 +258,7 @@ impl Ad {
             + STRING_LENGTH_PREFIX
             + STRING_LENGTH_PREFIX
             + (create_ad_args.text_len as usize) * 4
-            + create_ad_args.image.chars() * 4
+            + create_ad_args.image.chars().count() * 4
             + size_of::<i64>() // Timestamp
             + size_of::<u64>() // Rank
             + size_of::<Pubkey>() // Public key

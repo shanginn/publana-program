@@ -2,7 +2,7 @@ import * as anchor from '@project-serum/anchor';
 import * as assert from "assert";
 import { Program } from '@project-serum/anchor';
 import { SolanaAds } from '../target/types/solana_ads';
-import { PublicKey } from '@solana/web3.js';
+import { PublicKey, Keypair } from '@solana/web3.js';
 import BN from 'BN.js';
 
 export const kolyanPublicKey = new PublicKey('hobB4CWoWbxatFFXfCJTKEeoWXbFfTDbrQmRdGr7aUz');
@@ -14,25 +14,19 @@ describe('solana_ads', () => {
 
   const program = anchor.workspace.SolanaAds as Program<SolanaAds>;
 
-  it('can create ad!', async () => {
-    
+  async function createAd(title: string, content: string, image: string, length: Number): Promise<Keypair> {
     const ad = anchor.web3.Keypair.generate();
-
-    const title = 'test';
-    const content = 'test';
-
     const derivedAddress = await anchor.web3.PublicKey.createWithSeed(
       program.provider.wallet.publicKey,
       'seed',
       program.programId,
     )
 
-    console.log(derivedAddress.toBase58());
-
     const tx = await program.rpc.createAd(
       title,
       content,
-      title.length + content.length,
+      image,
+      length,
       new BN(0),
       {
         accounts: {
@@ -49,139 +43,132 @@ describe('solana_ads', () => {
 
     console.log("Your transaction signature", tx);
 
+    return ad;
+  }
+
+  it('can create ad!', async () => {
+    const title = 'test';
+    const content = 'test';
+    const image = '';
+
+    const ad = await createAd(title, content, image, title.length + content.length);
+
+    let adAccount = await program.account.ad.fetch(ad.publicKey);
+    console.log(adAccount);
+
+    assert.equal(adAccount.title, title);
+    assert.equal(adAccount.content, content);
+    assert.equal(adAccount.image, image);
+  });
+
+  it('can append ad content', async () => {
+
+    const title = 'test';
+    const content = 'test';
+    const appendedContent = 'appended content'
+
+    const ad = await createAd(title, content, '', title.length + content.length + appendedContent.length);
+
     let adAccount = await program.account.ad.fetch(ad.publicKey);
     console.log(adAccount);
     assert.equal(adAccount.title, title);
     assert.equal(adAccount.content, content);
+
+    await program.rpc.appendAdContent(
+      appendedContent,
+      {
+        accounts: {
+          authority: program.provider.wallet.publicKey,
+          ad: ad.publicKey,
+        },
+      }
+    );
+
+    adAccount = await program.account.ad.fetch(ad.publicKey);
+    console.log(adAccount);
+    assert.equal(adAccount.title, title);
+    assert.equal(adAccount.content, content + appendedContent);
+    
   });
 
-  // it('can append ad content', async () => {
-    
-  //   const ad = anchor.web3.Keypair.generate();
+  it('can not exceed text limit', async () => {
 
-  //   const title = 'test';
-  //   const content = 'test';
-  //   const appendedContent = 'appended content'
+    const title = 'test';
+    const content = 'test';
+    const appendedContent = 'appended content'
 
-  //   const tx = await program.rpc.createAd(
-  //     title,
-  //     content,
-  //     title.length + content.length + appendedContent.length,
-  //     {
-  //       accounts: {
-  //         authority: program.provider.wallet.publicKey,
-  //         systemProgram: anchor.web3.SystemProgram.programId,
-  //         ad: ad.publicKey,
-  //       },
-  //       signers: [ad],
-  //     }
-  //   );
+    const ad = await createAd(title, content, '', title.length + content.length);
 
-  //   console.log("Your transaction signature", tx);
+    try {
+      await program.rpc.appendAdContent(
+        appendedContent,
+        {
+          accounts: {
+            authority: program.provider.wallet.publicKey,
+            ad: ad.publicKey,
+          },
+        }
+      );
+    } catch (error) {
+      assert.equal(error.msg, 'Can not update Ad. Text limit will be exceeded.');
+      return;
+    } 
+  });
 
-  //   let adAccount = await program.account.ad.fetch(ad.publicKey);
-  //   console.log(adAccount);
-  //   assert.equal(adAccount.title, title);
-  //   assert.equal(adAccount.content, content);
+  it('can append a lot of content', async () => {
+    const title = "a".repeat(280);
+    const content = '';
 
-  //   await program.rpc.appendAdContent(
-  //     appendedContent,
-  //     {
-  //       accounts: {
-  //         authority: program.provider.wallet.publicKey,
-  //         ad: ad.publicKey,
-  //       },
-  //     }
-  //   );
+    const ad = await createAd(title, content, '', 2500);
 
-  //   adAccount = await program.account.ad.fetch(ad.publicKey);
-  //   console.log(adAccount);
-  //   assert.equal(adAccount.title, title);
-  //   assert.equal(adAccount.content, content + appendedContent);
-    
-  // });
+    let adAccount = await program.account.ad.fetch(ad.publicKey);
+    console.log(adAccount);
+    assert.equal(adAccount.title, title);
+    assert.equal(adAccount.content, content);
 
-  // it('can not exceed text limit', async () => {
-    
-  //   const ad = anchor.web3.Keypair.generate();
+    let tx = await program.rpc.appendAdContent(
+      "♡".repeat(300),
+      {
+        accounts: {
+          authority: program.provider.wallet.publicKey,
+          ad: ad.publicKey,
+        },
+      }
+    );
 
-  //   const title = 'test';
-  //   const content = 'test';
-  //   const appendedContent = 'appended content'
+    console.log("Your transaction signature", tx);
 
-  //   const tx = await program.rpc.createAd(
-  //     title,
-  //     content,
-  //     title.length + content.length,
-  //     {
-  //       accounts: {
-  //         authority: program.provider.wallet.publicKey,
-  //         systemProgram: anchor.web3.SystemProgram.programId,
-  //         ad: ad.publicKey,
-  //       },
-  //       signers: [ad],
-  //     }
-  //   );
+    adAccount = await program.account.ad.fetch(ad.publicKey);
+    console.log(adAccount);
+  });
 
-  //   console.log("Your transaction signature", tx);
+  it('can delete ad', async () => {
 
-  //   try {
-  //     await program.rpc.appendAdContent(
-  //       appendedContent,
-  //       {
-  //         accounts: {
-  //           authority: program.provider.wallet.publicKey,
-  //           ad: ad.publicKey,
-  //         },
-  //       }
-  //     );
-  //   } catch (error) {
-  //     assert.equal(error.msg, 'Can not update Ad. Text limit will be exceeded.');
-  //     return;
-  //   } 
-  // });
+    const title = 'test';
+    const content = 'test';
 
-  // it('can append a lot of content', async () => {
-    
-  //   const ad = anchor.web3.Keypair.generate();
+    const ad = await createAd(title, content, '', title.length + content.length);
 
-  //   const title = "a".repeat(280);
-  //   const content = '';
+    let adAccount = await program.account.ad.fetch(ad.publicKey);
+    console.log(adAccount);
+    assert.equal(adAccount.title, title);
+    assert.equal(adAccount.content, content);
 
-  //   let tx = await program.rpc.createAd(
-  //     title,
-  //     content,
-  //     2500,
-  //     {
-  //       accounts: {
-  //         authority: program.provider.wallet.publicKey,
-  //         systemProgram: anchor.web3.SystemProgram.programId,
-  //         ad: ad.publicKey,
-  //       },
-  //       signers: [ad],
-  //     }
-  //   );
+    await program.rpc.deleteAd(
+      {
+        accounts: {
+          authority: program.provider.wallet.publicKey,
+          ad: ad.publicKey,
+        },
+      }
+    );
 
-  //   console.log("Your transaction signature", tx);
-
-  //   let adAccount = await program.account.ad.fetch(ad.publicKey);
-  //   console.log(adAccount);
-  //   assert.equal(adAccount.title, title);
-  //   assert.equal(adAccount.content, content);
-
-  //   tx = await program.rpc.appendAdContent(
-  //     "♡".repeat(300),
-  //     {
-  //       accounts: {
-  //         authority: program.provider.wallet.publicKey,
-  //         ad: ad.publicKey,
-  //       },
-  //     }
-  //   );
-
-  //   console.log("Your transaction signature", tx);
-
-  //   adAccount = await program.account.ad.fetch(ad.publicKey);
-  //   console.log(adAccount);
-  // });
+    try {
+      await program.account.ad.fetch(ad.publicKey);
+    } catch (error) {
+      assert.equal(error.message, 'Account does not exist ' + ad.publicKey);
+      
+      return;
+    }
+  });
 });
